@@ -8,6 +8,12 @@ from typing import Any
 
 from app.seed import SEED_ROWS
 
+# 阀门井室状态口径与 app.services.valve 保持一致；概览不直接依赖服务层，
+# 这里用同一份字符串常量避免口径分叉。
+VALVE_MODULE = "valve"
+VALVE_STUCK_STATUS = "启闭卡涩"
+VALVE_WORKLIST_STATUSES = {"待启闭", VALVE_STUCK_STATUS}
+
 
 class Store:
     def __init__(self) -> None:
@@ -31,11 +37,19 @@ class Store:
         modules: list[dict[str, object]] = []
         for name in self.module_names():
             rows = self.rows(name)
+            if name == VALVE_MODULE:
+                # 阀门状态以 status 为唯一口径：待启闭/启闭卡涩算待处理，
+                # 启闭卡涩算异常，与阀门台账、详情页保持一致。
+                pending = sum(1 for row in rows if row.get("status") in VALVE_WORKLIST_STATUSES)
+                abnormal = sum(1 for row in rows if row.get("status") == VALVE_STUCK_STATUS)
+            else:
+                pending = sum(1 for row in rows if row.get("pending"))
+                abnormal = sum(1 for row in rows if row.get("abnormal"))
             modules.append({
                 "name": name,
                 "created": len(rows),
-                "pending": sum(1 for row in rows if row.get("pending")),
-                "abnormal": sum(1 for row in rows if row.get("abnormal")),
+                "pending": pending,
+                "abnormal": abnormal,
             })
         cards = [
             {"label": "业务模块", "value": len(modules)},
