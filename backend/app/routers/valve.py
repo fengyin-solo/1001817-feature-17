@@ -1,4 +1,4 @@
-"""阀门井室接口：维护阀门，覆盖安排启闭、确认正常、停用阀门等动作。"""
+"""阀门井室接口：维护阀门，覆盖安排启闭、确认正常、确认卡涩、卡涩复核、停用阀门等动作。"""
 from __future__ import annotations
 
 from typing import Any
@@ -30,9 +30,22 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/summary")
+def summary() -> dict[str, Any]:
+    """阀门状态汇总：与台账同一份口径，供列表页统计卡片使用。"""
+    return service.summary()
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出阀门井室清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "valve", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
-    """读取单条阀门明细；不存在时给出可读的错误说明。"""
+    """读取单条阀门明细（含状态变更记录）；不存在时给出可读的错误说明。"""
     entry = service.get_entry(entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"阀门 {entry_id} 不存在或已归档")
@@ -45,21 +58,21 @@ def create_entry(payload: EntryPayload) -> ActionResult:
     entry, missing = service.create_entry(payload.values)
     if missing:
         return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
-    return ActionResult(ok=True, message="阀门已登记", entry=entry)
+    return ActionResult(ok=True, message="阀门已登记，进入待启闭清单", entry=entry)
 
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条阀门执行安排启闭、确认正常、停用阀门；不允许的动作会被拦下并说明原因。"""
-    action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    """对单条阀门执行状态动作；不满足流转条件时保留原状态并说明原因。"""
+    values = payload.values
+    action = str(values.get("action") or "").strip()
+    entry, message = service.run_action(
+        entry_id,
+        action,
+        reason=str(values.get("reason") or ""),
+        result=str(values.get("result") or "").strip(),
+        note=str(values.get("note") or payload.remark or ""),
+    )
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出阀门井室清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "valve", "total": total, "items": items}
